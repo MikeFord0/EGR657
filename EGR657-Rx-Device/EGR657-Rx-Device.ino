@@ -8,6 +8,13 @@
 #include <esp_mac.h>  // For the MAC2STR and MACSTR macros
 
 #include <vector>
+#include <SPI.h>
+#include <SD.h>
+#include <time.h>
+
+
+const int chipSelect = 5;  // Adjust based on your SD module wiring
+const char* filename = "/data_log.csv";
 
 /* Definitions */
 
@@ -27,6 +34,7 @@ struct DataPacket {
 };
 
 DataPacket receivedData[MAX_SAMPLES];
+DataPacket dataToLog;
 int receivedCount = 0;
 
 // Web server instance
@@ -54,6 +62,10 @@ public:
 
   // Function to print the received messages from the master
   void onReceive(const uint8_t *data, size_t len, bool broadcast) {
+    
+memcpy(&dataToLog, data, len);
+
+    logDataToSD(dataToLog);
    if (receivedCount < MAX_SAMPLES) {
         memcpy(&receivedData[receivedCount], data, len);
         receivedCount++;
@@ -190,6 +202,67 @@ void register_new_master(const esp_now_recv_info_t *info, const uint8_t *data, i
   }
 }
 
+// ---------------------- NTP ----------------------
+void setupTime() {
+    configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+    Serial.print("Waiting for NTP time");
+    time_t now = time(nullptr);
+    while (now < 8 * 3600 * 2) {
+        delay(500);
+        Serial.print(".");
+        now = time(nullptr);
+    }
+    Serial.println("\nTime synced.");
+}
+
+// ---------------------- SD INIT FUNCTION ----------------------
+void initializeSDCard() {
+    if (!SD.begin(chipSelect)) {
+        Serial.println("SD card initialization failed!");
+    }
+    else
+    {
+      Serial.println("SD card initialized.");
+    }
+    // Create CSV header if file doesn't exist
+    if (!SD.exists(filename)) {
+        File file = SD.open(filename, FILE_WRITE);
+        if (file) {
+            file.println("Temperature,LightLevel,Humidity,SoilMoisture,SolarCurrent,SolarVoltage,LoadCurrent,LoadVoltage");
+            file.close();
+            Serial.println("CSV header written.");
+        } else {
+            Serial.println("Failed to create CSV file!");
+        }
+    }
+}
+
+// ---------------------- LOGGING FUNCTION ----------------------
+void logDataToSD(const DataPacket& packet) {
+    File file = SD.open(filename, FILE_APPEND);
+    if (file) {
+       // Get current timestamp
+        time_t now = time(nullptr);
+        struct tm* timeinfo = localtime(&now);
+        char timestamp[30];
+        strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", timeinfo);
+
+        file.print(timestamp); file.print(",");
+        file.print(packet.temperature);   file.print(",");
+        file.print(packet.lightLevel);    file.print(",");
+        file.print(packet.humidity);      file.print(",");
+        file.print(packet.soilMoisture);  file.print(",");
+        file.print(packet.solarCurrent);  file.print(",");
+        file.print(packet.solarVoltage);  file.print(",");
+        file.print(packet.loadCurrent);   file.print(",");
+        file.println(packet.loadVoltage);
+        file.close();
+        Serial.println("Data logged to SD card.");
+    } else {
+        Serial.println("Failed to open CSV file for appending.");
+    }
+}
+
 /* Main */
 
 void setup() {
@@ -229,6 +302,8 @@ void setup() {
 
   // Register the new peer callback
   ESP_NOW.onNewPeer(register_new_master, NULL);
+
+  setupTime();
 
   Serial.println("Setup complete. Waiting for a master to broadcast a message...");
 

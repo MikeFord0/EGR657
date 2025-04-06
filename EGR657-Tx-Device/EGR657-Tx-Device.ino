@@ -3,9 +3,15 @@
 
 #include <esp_mac.h>  // For the MAC2STR and MACSTR macros
 
+#include <SPI.h>
+#include <SD.h>
+
 /* Definitions */
 
 #define ESPNOW_WIFI_CHANNEL 6
+
+const int chipSelect = 5;  // Adjust based on your SD module wiring
+const char* filename = "/data_log.csv";
 
 /* Classes */
 
@@ -63,6 +69,48 @@ struct DataPacket {
 
    DataPacket dataPacket;
 
+// ---------------------- SD INIT FUNCTION ----------------------
+void initializeSDCard() {
+
+    if (!SD.begin(chipSelect)) {
+        Serial.println("SD card initialization failed!");
+    }
+    else
+    {
+      Serial.println("SD card initialized.");
+    }
+    // Create CSV header if file doesn't exist
+    if (!SD.exists(filename)) {
+        File file = SD.open(filename, FILE_WRITE);
+        if (file) {
+            file.println("Temperature,LightLevel,Humidity,SoilMoisture,SolarCurrent,SolarVoltage,LoadCurrent,LoadVoltage");
+            file.close();
+            Serial.println("CSV header written.");
+        } else {
+            Serial.println("Failed to create CSV file!");
+        }
+    }
+}
+
+// ---------------------- LOGGING FUNCTION ----------------------
+void logDataToSD(const DataPacket& packet) {
+    File file = SD.open(filename, FILE_APPEND);
+    if (file) {
+
+        file.print(packet.temperature);   file.print(",");
+        file.print(packet.lightLevel);    file.print(",");
+        file.print(packet.humidity);      file.print(",");
+        file.print(packet.soilMoisture);  file.print(",");
+        file.print(packet.solarCurrent);  file.print(",");
+        file.print(packet.solarVoltage);  file.print(",");
+        file.print(packet.loadCurrent);   file.print(",");
+        file.println(packet.loadVoltage);
+        file.close();
+        Serial.println("Data logged to SD card.");
+    } else {
+        Serial.println("Failed to open CSV file for appending.");
+    }
+}
 
 void setup() {
   Serial.begin(115200);
@@ -85,7 +133,7 @@ void setup() {
   }
           delay(500);  // Ensure serial output finishes before sleep
 
-
+initializeSDCard();
 //-----------------------------------------------------------------------
 //TODO: Insert sensor setup and getting actua data, possibly modify delays 
 //------------------------------------------------------------------------
@@ -100,6 +148,8 @@ void setup() {
     dataPacket.solarVoltage = random(1000, 2000) * 0.01;  // 10.00 - 20.00 V
     dataPacket.loadCurrent = random(0, 500) * 0.01;  
     dataPacket.loadVoltage = random(500, 1200) * 0.01;
+
+logDataToSD(dataPacket);
 
       if (!broadcast_peer.send_message((uint8_t *)&dataPacket, sizeof(dataPacket))) {
     Serial.println("Failed to broadcast message");
